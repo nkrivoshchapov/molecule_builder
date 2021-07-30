@@ -10,6 +10,7 @@ logger = createLogger("Molecule")
 class Molecule:
     def __init__(self, origin = None):
         if origin is not None: # A simple copy constructor
+            logger.info("Copying molecule")
             self.G = deepcopy(origin.G)
             self.associated_frames = []
             for f in origin.associated_frames:
@@ -17,10 +18,12 @@ class Molecule:
                 newframe.mol = self
                 self.associated_frames.append(newframe)
         else: # Create the main structures
+            logger.info("Creating an empty molecule")
             self.G = nx.Graph()
             self.associated_frames = []
 
     def parseMol(self, filename):
+        logger.info("Parsing the file " + filename)
         lines = open(filename, "r").readlines()
         natoms = int(lines[3][0:3])
         nbonds = int(lines[3][3:6])
@@ -36,23 +39,25 @@ class Molecule:
             self.G.add_edge(at1 - 1, at2 - 1)
             self.G[at1 - 1][at2 - 1]['bondtype'] = int(lines[i][7:10])
 
-    def fix_indicies(self, start = 0):
-        self.G = nx.convert_node_labels_to_integers(self.G, first_label = start)
-
-    def get_bond_length(self, at1, at2):
-        return norm(self.G.nodes[at1]['xyz'] - self.G.nodes[at2]['xyz'])
-
     def writeMol(self, filename):
         self.fix_indicies()
         lines = ["", "", ""]
-        lines.append("%3d%3d  0  0  0  0  0  0  0  0999 V2000" % (self.G.number_of_nodes(), self.G.number_of_edges()))
+        """+len(self.associated_frames)"""
+        lines.append("%3d%3d  0  0  0  0  0  0  0  0999 V2000" % (self.G.number_of_nodes() +len(self.associated_frames), self.G.number_of_edges()))
         #   -5.5250    1.6470    1.0014 C   0  0  0  0  0  0  0  0  0  0  0  0
         for i in list(self.G.nodes()):
             lines.append("%10.4f%10.4f%10.4f%3s  0  0  0  0  0  0  0  0  0  0  0  0" % (
-                self.G.nodes[i]['xyz'][0],
-                self.G.nodes[i]['xyz'][1],
-                self.G.nodes[i]['xyz'][2],
-                self.G.nodes[i]['atom_symbol']))
+                                                                                    self.G.nodes[i]['xyz'][0],
+                                                                                    self.G.nodes[i]['xyz'][1],
+                                                                                    self.G.nodes[i]['xyz'][2],
+                                                                                    self.G.nodes[i]['atom_symbol']))
+
+        for frame in list(self.associated_frames):
+            lines.append("%10.4f%10.4f%10.4f%3s  0  0  0  0  0  0  0  0  0  0  0  0" % (
+                                                                                    frame.matrix[0, 3],
+                                                                                    frame.matrix[1, 3],
+                                                                                    frame.matrix[2, 3],
+                                                                                    "U"))
 
         for edge in list(self.G.edges()):
             lines.append("%3s%3s%3s  0" % (edge[0] + 1,
@@ -64,7 +69,24 @@ class Molecule:
         file.write("\n".join(lines))
         file.close()
 
+    def fix_indicies(self, start = 0):
+        self.G = nx.convert_node_labels_to_integers(self.G, first_label = start, label_attribute="old_idx")
+        for frame in self.associated_frames:
+            for node in set(self.G.nodes()):
+                if self.G.nodes[node]['old_idx'] == frame.center:
+                    logger.info("Switched center %d -> %d" % (frame.center, node))
+                    frame.center = node
+                    if not norm(frame.matrix[:3, 3] - self.G.nodes[frame.center]['xyz']) < 0.001:
+                        logger.info(repr(frame.matrix[:3, 3]))
+                        logger.info(repr(self.G.nodes[frame.center]['xyz']))
+                        # raise Exception("fix_indicies ")
+                    break
+
+    def get_bond_length(self, at1, at2):
+        return norm(self.G.nodes[at1]['xyz'] - self.G.nodes[at2]['xyz'])
+
     def create_fragment(self, central_atom, other_atom):
+        # self.fix_indicies()
         newmol = Molecule()
         newmol.G = deepcopy(self.G)
         newmol.G.remove_edge(central_atom, other_atom)
@@ -80,6 +102,8 @@ class Molecule:
                 newframe = Frame(frame)
                 newframe.mol = newmol
                 newmol.associated_frames.append(newframe)
+                logger.info("Check: " + repr(newframe.matrix))
+                logger.info("Check: " + repr(newmol.G.nodes[newframe.center]['xyz']))
         return newmol
 
     def create_frame(self, at0, at1, at2):
@@ -87,15 +111,14 @@ class Molecule:
         newframe.construct(self, at0, at1, at2)
         return newframe
 
-    def merge(self, other):
-        self.fix_indicies()
-        other.fix_indicies(start = self.G.number_of_nodes())
-        for node in set(other.G.nodes()):
-            self.G.add_node(node)
-            self.G.nodes[node]['xyz'] = deepcopy(other.G.nodes[node]['xyz'])
-            self.G.nodes[node]['atom_symbol'] = deepcopy(other.G.nodes[node]['atom_symbol'])
-
-        for edge in set(other.G.edges()):
-            self.G.add_edge(*edge)
-            self.G[edge[0]][edge[1]]['bondtype'] = deepcopy(other.G[edge[0]][edge[1]]['bondtype'])
-
+    def find_frame(self, other_frame):
+        best_idx = -1
+        best_norm = -1
+        for i, frame in enumerate(self.associated_frames):
+            diff = norm(frame.matrix - other_frame.matrix)
+            if diff < best_norm or best_norm == -1:
+                best_norm = diff
+                best_idx = i
+        if best_idx == -1:
+            raise Exception("No frame was found")
+        return self.associated_frames[best_idx]
