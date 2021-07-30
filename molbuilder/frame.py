@@ -1,9 +1,12 @@
 import numpy as np
 from numpy.linalg import norm, inv, det
+from numpy import cos, sin
 from .logging import createLogger
 from copy import deepcopy
 
 logger = createLogger("Frame")
+deg2rad = 0.0174532925199432957692
+rad2deg = 57.295779513082320877
 
 class Frame:
     def __init__(self, origin = None):
@@ -26,15 +29,19 @@ class Frame:
         self.matrix[3, 3] = 1
         mol.associated_frames.append(self)
 
-        self.mol.fix_indicies()
-        for i, frame in enumerate(self.mol.associated_frames):
-            logger.info("Old frame : " + repr(frame.matrix))
-            logger.info("Old center : " + repr(self.mol.G.nodes[frame.center]['xyz']))
-
     def shift(self, dist):
         shift_matrix = np.identity(4)
         shift_matrix[0, 3] = dist
         self.matrix = self.matrix @ shift_matrix
+
+    def rotate(self, torsion):
+        torsion *= deg2rad
+        rotation_matrix = np.identity(4)
+        rotation_matrix[1, 1] = cos(torsion)
+        rotation_matrix[2, 2] = cos(torsion)
+        rotation_matrix[1, 2] = sin(torsion)
+        rotation_matrix[2, 1] = -sin(torsion)
+        self.matrix = self.matrix @ rotation_matrix
 
     def join(self, other):
         logger.info("Running join")
@@ -42,7 +49,6 @@ class Frame:
         myframe[:, 0] = -myframe[:, 0]
         myframe[:, 2] = -myframe[:, 2]
         basis_change =  other.matrix @ inv(myframe)
-        logger.warning("Det = %f" % det(basis_change))
         for i in set(self.mol.G.nodes()):
             vec = np.array([self.mol.G.nodes[i]['xyz'][0],
                             self.mol.G.nodes[i]['xyz'][1],
@@ -53,9 +59,6 @@ class Frame:
 
         self.mol.fix_indicies()
         other.mol.fix_indicies(start=self.mol.G.number_of_nodes())
-        for i, frame in enumerate(self.mol.associated_frames):
-            logger.info("Old frame : " + repr(frame.matrix))
-            logger.info("Old center : " + repr(self.mol.G.nodes[frame.center]['xyz']))
 
         for node in set(other.mol.G.nodes()):
             self.mol.G.add_node(node)
@@ -68,8 +71,6 @@ class Frame:
 
         for i, frame in enumerate(self.mol.associated_frames):
             self.mol.associated_frames[i].matrix = basis_change @ frame.matrix
-            logger.info("New frame : " + repr(self.mol.associated_frames[i].matrix))
-            logger.info("New center : " + repr(self.mol.G.nodes[self.mol.associated_frames[i].center]['xyz']))
 
         for frame in other.mol.associated_frames:
             newframe = Frame(frame)
@@ -79,4 +80,3 @@ class Frame:
         # Create bond between frame centers
         self.mol.G.add_edge(self.center, other.center)
         self.mol.G[self.center][other.center]['bondtype'] = 1
-        self.mol.fix_indicies()

@@ -42,9 +42,8 @@ class Molecule:
     def writeMol(self, filename):
         self.fix_indicies()
         lines = ["", "", ""]
-        """+len(self.associated_frames)"""
-        lines.append("%3d%3d  0  0  0  0  0  0  0  0999 V2000" % (self.G.number_of_nodes() +len(self.associated_frames), self.G.number_of_edges()))
-        #   -5.5250    1.6470    1.0014 C   0  0  0  0  0  0  0  0  0  0  0  0
+
+        lines.append("%3d%3d  0  0  0  0  0  0  0  0999 V2000" % (self.G.number_of_nodes(), self.G.number_of_edges()))
         for i in list(self.G.nodes()):
             lines.append("%10.4f%10.4f%10.4f%3s  0  0  0  0  0  0  0  0  0  0  0  0" % (
                                                                                     self.G.nodes[i]['xyz'][0],
@@ -52,12 +51,13 @@ class Molecule:
                                                                                     self.G.nodes[i]['xyz'][2],
                                                                                     self.G.nodes[i]['atom_symbol']))
 
-        for frame in list(self.associated_frames):
-            lines.append("%10.4f%10.4f%10.4f%3s  0  0  0  0  0  0  0  0  0  0  0  0" % (
-                                                                                    frame.matrix[0, 3],
-                                                                                    frame.matrix[1, 3],
-                                                                                    frame.matrix[2, 3],
-                                                                                    "U"))
+        # for frame in list(self.associated_frames): # Write frame centers as atoms. Add +len(self.associated_frames)
+        #                                                                           to the number of atoms
+        #     lines.append("%10.4f%10.4f%10.4f%3s  0  0  0  0  0  0  0  0  0  0  0  0" % (
+        #                                                                             frame.matrix[0, 3],
+        #                                                                             frame.matrix[1, 3],
+        #                                                                             frame.matrix[2, 3],
+        #                                                                             "U"))
 
         for edge in list(self.G.edges()):
             lines.append("%3s%3s%3s  0" % (edge[0] + 1,
@@ -86,7 +86,6 @@ class Molecule:
         return norm(self.G.nodes[at1]['xyz'] - self.G.nodes[at2]['xyz'])
 
     def create_fragment(self, central_atom, other_atom):
-        # self.fix_indicies()
         newmol = Molecule()
         newmol.G = deepcopy(self.G)
         newmol.G.remove_edge(central_atom, other_atom)
@@ -119,6 +118,6 @@ class Molecule:
             if diff < best_norm or best_norm == -1:
                 best_norm = diff
                 best_idx = i
-        if best_idx == -1:
+        if best_idx == -1 or best_norm > 0.001:
             raise Exception("No frame was found")
         return self.associated_frames[best_idx]
